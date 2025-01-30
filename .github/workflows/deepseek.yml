@@ -1,11 +1,16 @@
-name: Super-Linter
-
-on: push
 name: Code Review with DeepSeek-Coder R1
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize]
 
 jobs:
   code-review:
     runs-on: ubuntu-latest  # Change to self-hosted runner if using GPU
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,25 +22,48 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch torchvision torchaudio transformers accelerate
+          pip install torch transformers accelerate sentencepiece
 
       - name: Download DeepSeek-Coder R1 Model
         run: |
-          git lfs install
-          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
-          cd deepseek-coder-1.3b-base
-
-      - name: Run Code Review
-        run: |
+          # Direct model download without git lfs, if available publicly
           python -c "
-          from transformers import AutoModelForCausalLM, AutoTokenizer;
-          tokenizer = AutoTokenizer.from_pretrained('deepseek-ai/deepseek-coder-1.3b-base');
-          model = AutoModelForCausalLM.from_pretrained('deepseek-ai/deepseek-coder-1.3b-base', device_map='auto');
-          prompt = 'Review the following code for best practices:\n\n' + open('your_file_to_review.js').read();
-          inputs = tokenizer(prompt, return_tensors='pt').to('cuda');
-          outputs = model.generate(**inputs, max_new_tokens=512);
-          print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+          model_name = 'deepseek-ai/deepseek-coder-1.3b-base'
+          tokenizer = AutoTokenizer.from_pretrained(model_name)
+          model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto')
           "
+
+      - name: Get changed files in PR
+        id: changed-files
+        run: |
+          # Get list of changed files in the PR
+          changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "Changed files: $changed_files"
+          echo "files=$changed_files" >> $GITHUB_ENV
+
+      - name: Run Code Review on Changed Files
+        run: |
+          for file in $(echo "$files" | tr " " "\n")
+          do
+            echo "Reviewing file: $file"
+            python -c "
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            model_name = 'deepseek-ai/deepseek-coder-1.3b-base'
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto')
+
+            # Read code file
+            with open('$file', 'r') as f:
+                code = f.read()
+
+            # Generate prompt and review
+            prompt = f'Review the following code for best practices:\n\n{code}'
+            inputs = tokenizer(prompt, return_tensors='pt').to('cuda')
+            outputs = model.generate(**inputs, max_new_tokens=512)
+            print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+            "
+          done
 
       - name: Post Review as PR Comment
         uses: thollander/actions-comment-pull-request@v2
