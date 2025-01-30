@@ -51,7 +51,14 @@ jobs:
       - name: Get changed files
         id: changed-files
         run: |
-          git diff --name-only $GITHUB_SHA $GITHUB_SHA^ > changed_files.txt
+          if [ -z "$GITHUB_HEAD_REF" ]; then
+            # For regular pushes to main
+            git diff --name-only $GITHUB_SHA $GITHUB_SHA^ > changed_files.txt
+          else
+            # For pull requests
+            git fetch origin pull/$GITHUB_PULL_REQUEST_NUMBER/head:pr-branch
+            git diff --name-only origin/main...pr-branch > changed_files.txt
+          fi
           cat changed_files.txt
 
       - name: Run Code Review
