@@ -2,53 +2,29 @@ name: Code gemini
 
 on:
   pull_request:
-    branches: [main, develop]  # Customize branches
+    branches: [main, develop]
 
 jobs:
   code_review:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        language: [python, javascript] # Add more languages as needed
-
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up ${{ matrix.language }}
-        if: matrix.language == 'python'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9' # Or your preferred version
-
       - name: Set up Node.js
-        if: matrix.language == 'javascript'
         uses: actions/setup-node@v3
         with:
           node-version: 20 # Or your preferred version (18, 20, or 21)
 
-      - name: Clear npm cache (javascript)
-        if: matrix.language == 'javascript'
+      - name: Clear npm cache
         run: npm cache clean --force
 
-      - name: Install dependencies (${{ matrix.language }})
-        if: matrix.language == 'python'
-        run: pip install flake8 pylint # Add more Python linters
-
-      - name: Install dependencies (${{ matrix.language }})
-        if: matrix.language == 'javascript'
+      - name: Install dependencies
         run: npm install # Installs from package.json (including eslint)
 
-      - name: Run linters (${{ matrix.language }})
-        if: matrix.language == 'python'
-        run: |
-          flake8 . > flake8_results.txt
-          pylint . > pylint_results.txt
-
       - name: Run linters (javascript)
-        if: matrix.language == 'javascript'
         run: npx eslint . > eslint_results.txt # Use npx!
 
-      - name: Post results as comment (${{ matrix.language }})
+      - name: Post results as comment (javascript)
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -56,12 +32,7 @@ jobs:
             const fs = require('fs').promises;
             let results = "";
 
-            if ("${{ matrix.language }}" === "python") {
-              try { results += "## Flake8 Results\n\n\`\`\`\n" + await fs.readFile('flake8_results.txt', 'utf8') + "\n\`\`\`\n\n"; } catch (e) {}
-              try { results += "## Pylint Results\n\n\`\`\`\n" + await fs.readFile('pylint_results.txt', 'utf8') + "\n\`\`\`\n\n"; } catch (e) {}
-            } else if ("${{ matrix.language }}" === "javascript") {
-              try { results += "## ESLint Results\n\n\`\`\`\n" + await fs.readFile('eslint_results.txt', 'utf8') + "\n\`\`\`\n\n"; } catch (e) {}
-            }
+            try { results += "## ESLint Results\n\n\`\`\`\n" + await fs.readFile('eslint_results.txt', 'utf8') + "\n\`\`\`\n\n"; } catch (e) {}
 
             if (results) { // Only post if there are results to avoid empty comments
               return github.rest.issues.createComment({
