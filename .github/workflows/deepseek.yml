@@ -1,1 +1,43 @@
-h
+name: Super-Linter
+
+on: push
+name: Code Review with DeepSeek-Coder R1
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest  # Change to self-hosted runner if using GPU
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install torch torchvision torchaudio transformers accelerate
+
+      - name: Download DeepSeek-Coder R1 Model
+        run: |
+          git lfs install
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
+          cd deepseek-coder-1.3b-base
+
+      - name: Run Code Review
+        run: |
+          python -c "
+          from transformers import AutoModelForCausalLM, AutoTokenizer;
+          tokenizer = AutoTokenizer.from_pretrained('deepseek-ai/deepseek-coder-1.3b-base');
+          model = AutoModelForCausalLM.from_pretrained('deepseek-ai/deepseek-coder-1.3b-base', device_map='auto');
+          prompt = 'Review the following code for best practices:\n\n' + open('your_file_to_review.js').read();
+          inputs = tokenizer(prompt, return_tensors='pt').to('cuda');
+          outputs = model.generate(**inputs, max_new_tokens=512);
+          print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+          "
+
+      - name: Post Review as PR Comment
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          message: "Code review complete! Check the output above for suggestions."
