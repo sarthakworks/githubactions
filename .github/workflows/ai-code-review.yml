@@ -1,0 +1,44 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  ai_code_review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+
+      - name: Install dependencies (optional, if using self-hosted model)
+        run: |
+          sudo apt update
+          sudo apt install -y curl jq
+
+      - name: Analyze Code with AI
+        run: |
+          REVIEW_TEXT="AI Code Review Report:\n\n"
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == *.js || "$file" == *.ts || "$file" == *.py || "$file" == *.java ]]; then
+              echo "Reviewing: $file"
+              CONTENT=$(cat "$file" | head -c 10000 | jq -Rs .)  # Limit size to 10K chars
+              RESPONSE=$(curl -s -X POST "https://api-inference.huggingface.co/models/bigcode/starcoder" \
+                -H "Authorization: Bearer YOUR_HF_API_KEY" \
+                -H "Content-Type: application/json" \
+                --data "{\"inputs\": \"Review this code for best practices, security issues, and improvements:\n$CONTENT\"}")
+              AI_REVIEW=$(echo "$RESPONSE" | jq -r '.generated_text')
+              REVIEW_TEXT+="### $file\n$AI_REVIEW\n\n"
+            fi
+          done
+          echo "$REVIEW_TEXT" > review.md
+
+      - name: Post AI Review as PR Comment
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: review.md
