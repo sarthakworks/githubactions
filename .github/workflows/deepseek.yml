@@ -1,17 +1,16 @@
 name: Code Review with DeepSeek-Coder R1
 
 on:
-  pull_request:  # Or 'push' if you want it on all pushes, but PRs are recommended
+  push:
     branches:
-      - main  # Protect your main branch
+      - main
 
 jobs:
   code-review:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: write   # Grant write access to the contents (this allows commenting)
+      issues: write     # Grant write access to issues (required for commenting)
 
     steps:
       - name: Checkout code
@@ -24,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch transformers accelerate sentencepiece pylint flake8 mypy
+          pip install torch transformers accelerate sentencepiece
 
       - name: Install Git LFS
         run: |
@@ -50,45 +49,37 @@ jobs:
           git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
           cd deepseek-coder-1.3b-base
 
-      - name: Run Static Analysis
-        run: |
-          pylint --rcfile=.pylintrc --output-format=text *.py > pylint_results.txt
-          flake8 *.py > flake8_results.txt
-          mypy --ignore-missing-imports *.py > mypy_results.txt
-
       - name: Get changed files
         id: changed-files
         run: |
           git fetch origin
           git diff --name-only origin/main...$GITHUB_SHA > changed_files.txt
+          cat changed_files.txt
 
-      - name: Run Code Review with DeepSeek-Coder
-        id: deepseek-review
+      - name: Run Code Review for Optimizations
         run: |
-          python code_review.py  # Execute the Python script
-          cat review_output.txt # For debugging: See the review output in the logs
+          python -c "
+          from transformers import AutoModelForCausalLM, AutoTokenizer;
+          model_path = './deepseek-r1/deepseek-coder-1.3b-base';  # Path to model directory
+          tokenizer = AutoTokenizer.from_pretrained(model_path);
+          model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto');
+          
+          files_to_review = []
+          with open('changed_files.txt', 'r') as f:
+              files_to_review = f.read().splitlines()
 
-      - name: Post Code Review to Pull Request
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const reviewOutput = fs.readFileSync('review_output.txt', 'utf8');
-            github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              body: reviewOutput,
-              event: 'APPROVE' # Or 'REQUEST_CHANGES' to block merging
-            });
+          for file in files_to_review:
+              with open(file, 'r') as f:
+                  code = f.read();
+              inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\n\n{code}', return_tensors='pt').to('cuda');
+              outputs = model.generate(**inputs, max_new_tokens=512);
+              print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+          "
 
-      - name: Post Code Review to Commit (Fallback if not PR)
-        if: github.event_name != 'pull_request'
+      - name: Post Code Review to Commit
         run: |
           COMMIT_SHA=$GITHUB_SHA
-          COMMENT="Code review complete! Check the output below for suggestions on optimizations.\n\n$(cat review_output.txt)"
+          COMMENT="Code review complete! Check the output above for suggestions on optimizations."
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -d "{\"body\": \"$COMMENT\"}" \

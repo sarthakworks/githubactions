@@ -1,73 +1,95 @@
-name: Detect Code Optimizations with DeepSeek
+name: Code Review with DeepSeek-Coder R1
 
 on:
-  pull_request:
+  pull_request:  # Or 'push' if you want it on all pushes, but PRs are recommended
     branches:
-      - main
+      - main  # Protect your main branch
 
 jobs:
-  optimization-check:
-    runs-on: self-hosted  # IMPORTANT: Use a self-hosted runner
+  code-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
+          python-version: '3.10'
 
-      - name: Install Ollama
+      - name: Install dependencies
         run: |
-          curl -sSL https://ollama.com/install.sh | bash
+          pip install torch transformers accelerate sentencepiece pylint flake8 mypy
 
-      # REMOVE the ollama pull step - it's done on the runner
+      - name: Install Git LFS
+        run: |
+          sudo apt-get install git-lfs
+          git lfs install
+
+      - name: Cache DeepSeek-Coder R1 Model
+        id: cache-model
+        uses: actions/cache@v3
+        with:
+          path: deepseek-r1
+          key: deepseek-r1-model-v1
+          restore-keys: |
+            deepseek-r1-model-v1
+
+      - name: Download DeepSeek-Coder R1 Model (Fallback to Hugging Face)
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p deepseek-r1
+          cd deepseek-r1
+          echo "Attempting to download model from Hugging Face..."
+          git lfs install
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
+          cd deepseek-coder-1.3b-base
+
+      - name: Run Static Analysis
+        run: |
+          pylint --rcfile=.pylintrc --output-format=text *.py > pylint_results.txt
+          flake8 *.py > flake8_results.txt
+          mypy --ignore-missing-imports *.py > mypy_results.txt
 
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v35
-
-      - name: Run DeepSeek to analyze code (only changed files)
-        if: steps.changed-files.outputs.all_changed_files != ''
         run: |
-          CHANGED_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr '\n' ' ')
-          ollama run deepseek-r1 --input "$CHANGED_FILES" --output deepseek-report.json # Corrected model name
+          git fetch origin
+          git diff --name-only origin/main...$GITHUB_SHA > changed_files.txt
 
-      - name: Upload DeepSeek report as an artifact
-        if: steps.changed-files.outputs.all_changed_files != ''
-        uses: actions/upload-artifact@v3
-        with:
-          name: deepseek-report
-          path: deepseek-report.json
-          if-no-files-found: error
-
-      - name: Comment on Pull Request with DeepSeek suggestions
-        if: steps.changed-files.outputs.all_changed_files != ''
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Code Review with DeepSeek-Coder
+        id: deepseek-review
         run: |
-          REPORT=$(cat deepseek-report.json)
-          if [[ -s deepseek-report.json ]]; then
-            BODY="Code review complete! Check the suggestions for optimizations in the attached report.\n\n"
+          python code_review.py  # Execute the Python script
+          cat review_output.txt # For debugging: See the review output in the logs
 
-            if command -v jq >/dev/null 2>&1; then
-              PRETTY_REPORT=$(echo "$REPORT" | jq .)
-              BODY+="\`\`\`json\n$PRETTY_REPORT\n\`\`\`"
-            else
-              BODY+="\`\`\`json\n$REPORT\n\`\`\`"
-              echo "jq is not installed. Raw JSON report attached."
-            fi
-
-            curl -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{ \"body\": \"$BODY\" }" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
-          else
-            echo "No optimizations suggestions found or report is empty."
-          fi
-
-      - name: Download DeepSeek report (for debugging)
-        if: always() && steps.changed-files.outputs.all_changed_files != ''
-        uses: actions/download-artifact@v3
+      - name: Post Code Review to Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
         with:
-          name: deepseek-report
-          path: ./
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const reviewOutput = fs.readFileSync('review_output.txt', 'utf8');
+            github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              body: reviewOutput,
+              event: 'APPROVE' # Or 'REQUEST_CHANGES' to block merging
+            });
+
+      - name: Post Code Review to Commit (Fallback if not PR)
+        if: github.event_name != 'pull_request'
+        run: |
+          COMMIT_SHA=$GITHUB_SHA
+          COMMENT="Code review complete! Check the output below for suggestions on optimizations.\n\n$(cat review_output.txt)"
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/comments
