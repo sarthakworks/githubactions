@@ -9,7 +9,7 @@ on:
 
 jobs:
   code-review:
-    runs-on: ubuntu-latest  # Change to self-hosted runner if using GPU
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -24,17 +24,20 @@ jobs:
         run: |
           pip install torch transformers accelerate sentencepiece
 
-      # Cache DeepSeek-Coder R1 Model
+      - name: Install Git LFS
+        run: |
+          sudo apt-get install git-lfs
+          git lfs install
+
       - name: Cache DeepSeek-Coder R1 Model
         id: cache-model
         uses: actions/cache@v3
         with:
-          path: deepseek-r1  # Path to where the model will be stored
-          key: deepseek-r1-model-v1  # Cache key; can be versioned if the model changes
+          path: deepseek-r1
+          key: deepseek-r1-model-v1
           restore-keys: |
             deepseek-r1-model-v1
 
-      # Download DeepSeek-Coder R1 Model if not cached
       - name: Download DeepSeek-Coder R1 Model (Fallback to Hugging Face)
         if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
@@ -45,16 +48,24 @@ jobs:
           git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
           cd deepseek-coder-1.3b-base
 
+      - name: Get changed files
+        id: changed-files
+        run: |
+          git diff --name-only $GITHUB_SHA $GITHUB_SHA^ > changed_files.txt
+          cat changed_files.txt
+
       - name: Run Code Review
         run: |
           python -c "
           from transformers import AutoModelForCausalLM, AutoTokenizer;
-          model_path = './deepseek-r1';  # Path to model directory
+          model_path = './deepseek-r1/deepseek-coder-1.3b-base';  # Path to model directory
           tokenizer = AutoTokenizer.from_pretrained(model_path);
           model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto');
           
-          # Assuming files to review are in the repository
-          files_to_review = ['file1.js', 'file2.js'];  # Adjust dynamically for changed files
+          files_to_review = []
+          with open('changed_files.txt', 'r') as f:
+              files_to_review = f.read().splitlines()
+
           for file in files_to_review:
               with open(file, 'r') as f:
                   code = f.read();
