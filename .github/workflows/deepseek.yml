@@ -56,7 +56,7 @@ jobs:
           git diff --name-only origin/main...$GITHUB_SHA > changed_files.txt
           cat changed_files.txt
 
-      - name: Run Code Review
+      - name: Run Code Review for Optimizations
         run: |
           python -c "
           from transformers import AutoModelForCausalLM, AutoTokenizer;
@@ -71,7 +71,7 @@ jobs:
           for file in files_to_review:
               with open(file, 'r') as f:
                   code = f.read();
-              inputs = tokenizer(f'Review the following code for best practices:\n\n{code}', return_tensors='pt').to('cuda');
+              inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\n\n{code}', return_tensors='pt').to('cuda');
               outputs = model.generate(**inputs, max_new_tokens=512);
               print(tokenizer.decode(outputs[0], skip_special_tokens=True))
           "
@@ -79,7 +79,7 @@ jobs:
       - name: Post Code Review to Commit
         run: |
           COMMIT_SHA=$GITHUB_SHA
-          COMMENT="Code review complete! Check the output above for suggestions."
+          COMMENT="Code review complete! Check the output above for suggestions on optimizations."
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -d "{\"body\": \"$COMMENT\"}" \
