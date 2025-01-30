@@ -1,4 +1,4 @@
-name: Code Review (Static Analysis)
+name: Code gemini
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        language: [javascript] # Add more languages as needed
+        language: [python, javascript] # Add more languages as needed
 
     steps:
       - uses: actions/checkout@v3
@@ -24,7 +24,11 @@ jobs:
         if: matrix.language == 'javascript'
         uses: actions/setup-node@v3
         with:
-          node-version: 20 # Or your preferred version
+          node-version: 20 # Or your preferred version (18, 20, or 21)
+
+      - name: Clear npm cache (javascript)
+        if: matrix.language == 'javascript'
+        run: npm cache clean --force
 
       - name: Install dependencies (${{ matrix.language }})
         if: matrix.language == 'python'
@@ -32,7 +36,7 @@ jobs:
 
       - name: Install dependencies (${{ matrix.language }})
         if: matrix.language == 'javascript'
-        run: npm install eslint # Add more JavaScript linters
+        run: npm install # Installs from package.json (including eslint)
 
       - name: Run linters (${{ matrix.language }})
         if: matrix.language == 'python'
@@ -40,9 +44,9 @@ jobs:
           flake8 . > flake8_results.txt
           pylint . > pylint_results.txt
 
-      - name: Run linters (${{ matrix.language }})
+      - name: Run linters (javascript)
         if: matrix.language == 'javascript'
-        run: eslint . > eslint_results.txt
+        run: npx eslint . > eslint_results.txt # Use npx!
 
       - name: Post results as comment (${{ matrix.language }})
         uses: actions/github-script@v6
