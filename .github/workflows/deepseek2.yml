@@ -1,57 +1,110 @@
-name: Detect Code Optimizations with DeepSeek
+name: gemini
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  pull_request: # Trigger on pull requests
     branches:
       - main
 
 jobs:
-  optimization-check:
-    runs-on: ubuntu-latest
+  code-review:
+    runs-on: ubuntu-latest  # Still CPU-based, but optimized
+    permissions:
+      contents: read
+      pull-requests: write # Permission to comment on PRs
 
     steps:
-      # Step 1: Checkout the repository to get access to the code
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js (if DeepSeek requires Node.js, use the version you prefer)
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '14'
+          python-version: '3.10'
 
-      # Step 3: Install DeepSeek
+      - name: Install dependencies
         run: |
-          npm install -g deepseek
+          pip install torch transformers accelerate sentencepiece
 
-      # Step 4: Run DeepSeek to analyze the code and generate a JSON report
-      - name: Run DeepSeek to analyze code
+      - name: Install Git LFS
         run: |
-          deepseek analyze --report json --output deepseek-report.json
+          sudo apt-get install git-lfs
+          git lfs install
 
-      # Step 5: Upload DeepSeek report as an artifact (now using v3)
-      - name: Upload DeepSeek report as an artifact
-        uses: actions/upload-artifact@v3
+      - name: Cache DeepSeek-Coder R1 Model
+        id: cache-model
+        uses: actions/cache@v3
         with:
-          name: deepseek-report
-          path: deepseek-report.json
+          path: deepseek-coder-1.3b-base  # Consistent path
+          key: deepseek-coder-1.3b-base-v1
+          restore-keys: |
+            deepseek-coder-1.3b-base-v1
 
-      # Step 6: Comment on Pull Request with DeepSeek suggestions
-      - name: Comment on Pull Request with DeepSeek suggestions
+      - name: Download DeepSeek-Coder R1 Model (Fallback to Hugging Face)
+        if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
-          REPORT=$(cat deepseek-report.json)
-          if [ ! -z "$REPORT" ]; then
-            curl -X POST \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -d "{\"body\": \"Code review complete! Check the suggestions for optimizations. \n\n$REPORT\"}" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
-          fi
+          git lfs install
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
 
-      # Step 7: Add an optional cleanup or notification step (if needed)
-      - name: Notify if optimizations found
-        if: success() && steps.optimization-check.outcome == 'success'
+      - name: Load Model and Tokenizer (Outside the loop!)
+        id: load-model
         run: |
-          echo "Optimizations detected and posted to PR."
+          python -c "
+          from transformers import AutoModelForCausalLM, AutoTokenizer;
+          import os;
+          model_path = './deepseek-coder-1.3b-base';
+          tokenizer = AutoTokenizer.from_pretrained(model_path);
+          model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto'); # Still uses CPU
+          import pickle;
+          with open('model_and_tokenizer.pkl', 'wb') as f:
+              pickle.dump((model, tokenizer), f)
+          "
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v35
+        with:
+          format: space
+
+      - name: Run Code Review
+        id: code-review
+        run: |
+          python -c "
+          import pickle;
+          with open('model_and_tokenizer.pkl', 'rb') as f:
+              model, tokenizer = pickle.load(f);
+
+          import os;
+          changed_files = os.environ['CHANGED_FILES'].split();
+          review_comments = [];
+
+          for file in changed_files:
+              try:
+                  with open(file, 'r') as f:
+                      code = f.read();
+                  inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\n\n{code}', return_tensors='pt').to('cpu'); # Explicitly use CPU
+                  outputs = model.generate(**inputs, max_new_tokens=512);
+                  review = tokenizer.decode(outputs[0], skip_special_tokens=True);
+                  if review.strip(): # Only add comment if review is not empty
+                    review_comments.append(f'**{file}:**\n{review}\n---\n');
+              except Exception as e:
+                  review_comments.append(f'**Error reviewing {file}:** {e}\n---\n');
+
+          with open('review_comments.txt', 'w') as f:
+              f.write(''.join(review_comments));
+          "
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+
+      - name: Post Code Review to Pull Request
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const comments = fs.readFileSync('./review_comments.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comments
+            });
