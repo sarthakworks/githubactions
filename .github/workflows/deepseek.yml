@@ -8,6 +8,9 @@ on:
 jobs:
   code-review:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Grant write access to the contents (this allows commenting)
+      issues: write     # Grant write access to issues (required for commenting)
 
     steps:
       - name: Checkout code
