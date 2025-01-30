@@ -73,7 +73,11 @@ jobs:
               print(tokenizer.decode(outputs[0], skip_special_tokens=True))
           "
 
-      - name: Post Review as PR Comment
-        uses: thollander/actions-comment-pull-request@v2
-        with:
-          message: "Code review complete! Check the output above for suggestions."
+      - name: Post Code Review to Commit
+        run: |
+          COMMIT_SHA=$GITHUB_SHA
+          COMMENT="Code review complete! Check the output above for suggestions."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/comments
