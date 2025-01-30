@@ -33,9 +33,9 @@ jobs:
         run: |
           deepseek analyze --report json --output deepseek-report.json
 
-      # Step 5: Upload DeepSeek report as an artifact (no 'run' here, just 'uses')
+      # Step 5: Upload DeepSeek report as an artifact (updated to v4)
       - name: Upload DeepSeek report as an artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: deepseek-report
           path: deepseek-report.json
