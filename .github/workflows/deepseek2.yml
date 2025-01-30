@@ -1,16 +1,16 @@
-name: gemini
+name: Code Review with DeepSeek-Coder R1
 
 on:
-  pull_request: # Trigger on pull requests
+  pull_request:
     branches:
       - main
 
 jobs:
   code-review:
-    runs-on: ubuntu-latest  # Still CPU-based, but optimized
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write # Permission to comment on PRs
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -34,7 +34,7 @@ jobs:
         id: cache-model
         uses: actions/cache@v3
         with:
-          path: deepseek-coder-1.3b-base  # Consistent path
+          path: deepseek-coder-1.3b-base
           key: deepseek-coder-1.3b-base-v1
           restore-keys: |
             deepseek-coder-1.3b-base-v1
@@ -45,16 +45,15 @@ jobs:
           git lfs install
           git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
 
-      - name: Load Model and Tokenizer (Outside the loop!)
+      - name: Load Model and Tokenizer
         id: load-model
         run: |
           python -c "
           from transformers import AutoModelForCausalLM, AutoTokenizer;
-          import os;
+          import pickle;
           model_path = './deepseek-coder-1.3b-base';
           tokenizer = AutoTokenizer.from_pretrained(model_path);
-          model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto'); # Still uses CPU
-          import pickle;
+          model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto');
           with open('model_and_tokenizer.pkl', 'wb') as f:
               pickle.dump((model, tokenizer), f)
           "
@@ -62,8 +61,6 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v35
-        with:
-          format: space
 
       - name: Run Code Review
         id: code-review
@@ -74,20 +71,22 @@ jobs:
               model, tokenizer = pickle.load(f);
 
           import os;
-          changed_files = os.environ['CHANGED_FILES'].split();
+          changed_files_string = os.environ['CHANGED_FILES'];
+          changed_files = changed_files_string.split();
+
           review_comments = [];
 
           for file in changed_files:
               try:
                   with open(file, 'r') as f:
                       code = f.read();
-                  inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\n\n{code}', return_tensors='pt').to('cpu'); # Explicitly use CPU
+                  inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\\n\\n{code}', return_tensors='pt').to('cpu');
                   outputs = model.generate(**inputs, max_new_tokens=512);
                   review = tokenizer.decode(outputs[0], skip_special_tokens=True);
-                  if review.strip(): # Only add comment if review is not empty
-                    review_comments.append(f'**{file}:**\n{review}\n---\n');
+                  if review.strip():
+                    review_comments.append(f'**{file}:**\\n{review}\\n---\\n');
               except Exception as e:
-                  review_comments.append(f'**Error reviewing {file}:** {e}\n---\n');
+                  review_comments.append(f'**Error reviewing {file}:** {e}\\n---\\n');
 
           with open('review_comments.txt', 'w') as f:
               f.write(''.join(review_comments));
