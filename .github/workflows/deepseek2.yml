@@ -1,9 +1,6 @@
 name: Detect Code Optimizations with DeepSeek
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -11,42 +8,69 @@ on:
 jobs:
   optimization-check:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
 
     steps:
-      # Step 1: Checkout the repository to get access to the code
       - name: Checkout repository
-        uses: actions/checkout@v2
-
-      # Step 2: Set up Node.js (if DeepSeek requires Node.js, use the version you prefer)
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+        uses: actions/checkout@v3
         with:
-          node-version: '14'
+          fetch-depth: 0
 
-      # Step 3: Install DeepSeek
-      - name: Install DeepSeek
+      - name: Install Ollama
         run: |
-          npm install -g deepseek
+          curl -sSL https://ollama.com/install.sh | bash
 
-      # Step 4: Run DeepSeek to analyze the code and generate a JSON report
-      - name: Run DeepSeek to analyze code
+      - name: Pull DeepSeek r1 model using Ollama
         run: |
-          deepseek analyze --report json --output deepseek-report.json
+          ollama pull deepseek r1
 
-      # Step 5: Upload DeepSeek report as an artifact (updated to v4)
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v35
+
+      - name: Run DeepSeek to analyze code (only changed files)
+        if: steps.changed-files.outputs.all_changed_files != ''
+        run: |
+          CHANGED_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr '\n' ' ') # Convert to space-separated
+          ollama run deepseek r1 --input "$CHANGED_FILES" --output deepseek-report.json
+
       - name: Upload DeepSeek report as an artifact
-        uses: actions/upload-artifact@v4
+        if: steps.changed-files.outputs.all_changed_files != ''
+        uses: actions/upload-artifact@v3
         with:
           name: deepseek-report
           path: deepseek-report.json
+          if-no-files-found: error
 
-      # Step 6: Comment on Pull Request with DeepSeek suggestions
       - name: Comment on Pull Request with DeepSeek suggestions
+        if: steps.changed-files.outputs.all_changed_files != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPORT=$(cat deepseek-report.json)
-          if [ ! -z "$REPORT" ]; then
+          if [[ -s deepseek-report.json ]]; then
+            BODY="Code review complete! Check the suggestions for optimizations in the attached report.\n\n"
+
+            if command -v jq >/dev/null 2>&1; then
+              PRETTY_REPORT=$(echo "$REPORT" | jq .)
+              BODY+="\`\`\`json\n$PRETTY_REPORT\n\`\`\`"
+            else
+              BODY+="\`\`\`json\n$REPORT\n\`\`\`"
+              echo "jq is not installed. Raw JSON report attached."
+            fi
+
             curl -X POST \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -d "{\"body\": \"Code review complete! Check the suggestions for optimizations. \n\n$REPORT\"}" \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{ \"body\": \"$BODY\" }" \
               "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+          else
+            echo "No optimizations suggestions found or report is empty."
           fi
+
+      - name: Download DeepSeek report (for debugging)
+        if: always() && steps.changed-files.outputs.all_changed_files != ''
+        uses: actions/download-artifact@v3
+        with:
+          name: deepseek-report
+          path: ./
