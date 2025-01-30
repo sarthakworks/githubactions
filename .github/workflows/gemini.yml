@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        language: [python, javascript] # Add more languages as needed
+        language: [javascript] # Add more languages as needed
 
     steps:
       - uses: actions/checkout@v3
@@ -24,7 +24,7 @@ jobs:
         if: matrix.language == 'javascript'
         uses: actions/setup-node@v3
         with:
-          node-version: 16 # Or your preferred version
+          node-version: 20 # Or your preferred version
 
       - name: Install dependencies (${{ matrix.language }})
         if: matrix.language == 'python'
