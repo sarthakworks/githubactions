@@ -35,13 +35,15 @@ jobs:
             deepseek-r1-model-v1
 
       # Download DeepSeek-Coder R1 Model if not cached
-      - name: Download DeepSeek-Coder R1 (If Not Cached)
+      - name: Download DeepSeek-Coder R1 Model (Fallback to Hugging Face)
         if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
           mkdir -p deepseek-r1
           cd deepseek-r1
-          wget https://model.deepseek.com/deepseek-coder-r1.tar.gz
-          tar -xvzf deepseek-coder-r1.tar.gz
+          echo "Attempting to download model from Hugging Face..."
+          git lfs install
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
+          cd deepseek-coder-1.3b-base
 
       - name: Run Code Review
         run: |
