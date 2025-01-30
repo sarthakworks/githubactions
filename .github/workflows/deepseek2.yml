@@ -1,0 +1,59 @@
+name: Detect Code Optimizations with DeepSeek
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  optimization-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository to get access to the code
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Node.js (if DeepSeek requires Node.js, use the version you prefer)
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      # Step 3: Install DeepSeek (if DeepSeek isn't globally installed on the runner)
+      - name: Install DeepSeek
+        run: |
+          npm install -g deepseek
+
+      # Step 4: Run DeepSeek to analyze the code and generate a JSON report
+      - name: Run DeepSeek to analyze code
+        run: |
+          deepseek analyze --report json --output deepseek-report.json
+
+      # Step 5: Upload DeepSeek report as an artifact (for downloading later)
+      - name: Upload DeepSeek report as an artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: deepseek-report
+          path: deepseek-report.json
+
+      # Step 6: Comment on Pull Request with DeepSeek suggestions
+      - name: Comment on Pull Request with DeepSeek suggestions
+        run: |
+          REPORT=$(cat deepseek-report.json)
+          if [ ! -z "$REPORT" ]; then
+            curl -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -d "{\"body\": \"Code review complete! Check the suggestions for optimizations. \n\n$REPORT\"}" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+          fi
+
+      # Step 7: Add an optional cleanup or notification step (if needed)
+      # For example, you can post a status or send a notification based on the results.
+      - name: Notify if optimizations found
+        if: success() && steps.optimization-check.outcome == 'success'
+        run: |
+          echo "Optimizations detected and posted to PR."
