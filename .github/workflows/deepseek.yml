@@ -3,14 +3,14 @@ name: Code Review with DeepSeek-Coder R1
 on:
   push:
     branches:
-      - main
 
 jobs:
   code-review:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # Grant write access to the contents (this allows commenting)
-      issues: write     # Grant write access to issues (required for commenting)
+      contents: write
+      issues: write
+      pull-requests: write  # Important for PR comments
 
     steps:
       - name: Checkout code
@@ -19,11 +19,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.10'  # Or a suitable version
 
       - name: Install dependencies
         run: |
-          pip install torch transformers accelerate sentencepiece
+          pip install torch transformers accelerate sentencepiece pylint flake8 mypy  # Add static analysis tools
 
       - name: Install Git LFS
         run: |
@@ -35,7 +35,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: deepseek-r1
-          key: deepseek-r1-model-v1
+          key: deepseek-r1-model-v1  # Adjust key if model version changes
           restore-keys: |
             deepseek-r1-model-v1
 
@@ -46,8 +46,21 @@ jobs:
           cd deepseek-r1
           echo "Attempting to download model from Hugging Face..."
           git lfs install
-          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base  # Or latest model
           cd deepseek-coder-1.3b-base
+
+
+      - name: Run Static Analysis (pylint)
+        run: |
+          pylint --rcfile=.pylintrc --output-format=text *.py > pylint_results.txt  # Customize pylint command
+
+      - name: Run Static Analysis (flake8)
+        run: |
+          flake8 *.py > flake8_results.txt
+
+      - name: Run Type Checking (mypy)
+        run: |
+          mypy --ignore-missing-imports *.py > mypy_results.txt # Customize mypy command
 
       - name: Get changed files
         id: changed-files
@@ -56,31 +69,30 @@ jobs:
           git diff --name-only origin/main...$GITHUB_SHA > changed_files.txt
           cat changed_files.txt
 
-      - name: Run Code Review for Optimizations
+      - name: Run Code Review with DeepSeek-Coder
+        id: deepseek-review
         run: |
           python -c "
           from transformers import AutoModelForCausalLM, AutoTokenizer;
-          model_path = './deepseek-r1/deepseek-coder-1.3b-base';  # Path to model directory
+          import re
+
+          model_path = './deepseek-r1/deepseek-coder-1.3b-base';
           tokenizer = AutoTokenizer.from_pretrained(model_path);
           model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto');
-          
+
           files_to_review = []
           with open('changed_files.txt', 'r') as f:
               files_to_review = f.read().splitlines()
 
-          for file in files_to_review:
-              with open(file, 'r') as f:
-                  code = f.read();
-              inputs = tokenizer(f'Review the following code for optimization opportunities, including performance, algorithm efficiency, and unnecessary operations:\n\n{code}', return_tensors='pt').to('cuda');
-              outputs = model.generate(**inputs, max_new_tokens=512);
-              print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-          "
+          all_reviews = []
 
-      - name: Post Code Review to Commit
-        run: |
-          COMMIT_SHA=$GITHUB_SHA
-          COMMENT="Code review complete! Check the output above for suggestions on optimizations."
-          curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/comments
+          for file in files_to_review:
+              try:
+                  with open(file, 'r') as f:
+                      code = f.read()
+
+                  inputs = tokenizer(f'''
+Review the following Python code for optimization opportunities, including performance, memory usage, and algorithmic complexity.  Be specific and provide actionable suggestions.  Format your output with bullet points for each suggestion, including the file name and line number if applicable. If no issues are found, say "No issues found in {file}".
+
+```python
+{code}

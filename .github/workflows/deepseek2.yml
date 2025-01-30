@@ -7,8 +7,7 @@ on:
 
 jobs:
   optimization-check:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    runs-on: self-hosted  # IMPORTANT: Use a self-hosted runner
 
     steps:
       - name: Checkout repository
@@ -20,9 +19,7 @@ jobs:
         run: |
           curl -sSL https://ollama.com/install.sh | bash
 
-      - name: Pull DeepSeek r1 model using Ollama
-        run: |
-          ollama pull deepseek r1
+      # REMOVE the ollama pull step - it's done on the runner
 
       - name: Get changed files
         id: changed-files
@@ -31,8 +28,8 @@ jobs:
       - name: Run DeepSeek to analyze code (only changed files)
         if: steps.changed-files.outputs.all_changed_files != ''
         run: |
-          CHANGED_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr '\n' ' ') # Convert to space-separated
-          ollama run deepseek r1 --input "$CHANGED_FILES" --output deepseek-report.json
+          CHANGED_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr '\n' ' ')
+          ollama run deepseek-r1 --input "$CHANGED_FILES" --output deepseek-report.json # Corrected model name
 
       - name: Upload DeepSeek report as an artifact
         if: steps.changed-files.outputs.all_changed_files != ''
