@@ -1,8 +1,9 @@
 name: Code Review with DeepSeek-Coder R1
 
 on:
-  push:
+  pull_request:  # Or 'push' if you want it on all pushes, but PRs are recommended
     branches:
+      - main  # Protect your main branch
 
 jobs:
   code-review:
@@ -10,7 +11,7 @@ jobs:
     permissions:
       contents: write
       issues: write
-      pull-requests: write  # Important for PR comments
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -19,11 +20,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'  # Or a suitable version
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip install torch transformers accelerate sentencepiece pylint flake8 mypy  # Add static analysis tools
+          pip install torch transformers accelerate sentencepiece pylint flake8 mypy
 
       - name: Install Git LFS
         run: |
@@ -35,7 +36,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: deepseek-r1
-          key: deepseek-r1-model-v1  # Adjust key if model version changes
+          key: deepseek-r1-model-v1
           restore-keys: |
             deepseek-r1-model-v1
 
@@ -46,53 +47,49 @@ jobs:
           cd deepseek-r1
           echo "Attempting to download model from Hugging Face..."
           git lfs install
-          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base  # Or latest model
+          git clone https://huggingface.co/deepseek-ai/deepseek-coder-1.3b-base
           cd deepseek-coder-1.3b-base
 
-
-      - name: Run Static Analysis (pylint)
+      - name: Run Static Analysis
         run: |
-          pylint --rcfile=.pylintrc --output-format=text *.py > pylint_results.txt  # Customize pylint command
-
-      - name: Run Static Analysis (flake8)
-        run: |
+          pylint --rcfile=.pylintrc --output-format=text *.py > pylint_results.txt
           flake8 *.py > flake8_results.txt
-
-      - name: Run Type Checking (mypy)
-        run: |
-          mypy --ignore-missing-imports *.py > mypy_results.txt # Customize mypy command
+          mypy --ignore-missing-imports *.py > mypy_results.txt
 
       - name: Get changed files
         id: changed-files
         run: |
           git fetch origin
           git diff --name-only origin/main...$GITHUB_SHA > changed_files.txt
-          cat changed_files.txt
 
       - name: Run Code Review with DeepSeek-Coder
         id: deepseek-review
         run: |
-          python -c "
-          from transformers import AutoModelForCausalLM, AutoTokenizer;
-          import re
+          python code_review.py  # Execute the Python script
+          cat review_output.txt # For debugging: See the review output in the logs
 
-          model_path = './deepseek-r1/deepseek-coder-1.3b-base';
-          tokenizer = AutoTokenizer.from_pretrained(model_path);
-          model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto');
+      - name: Post Code Review to Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const reviewOutput = fs.readFileSync('review_output.txt', 'utf8');
+            github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              body: reviewOutput,
+              event: 'APPROVE' # Or 'REQUEST_CHANGES' to block merging
+            });
 
-          files_to_review = []
-          with open('changed_files.txt', 'r') as f:
-              files_to_review = f.read().splitlines()
-
-          all_reviews = []
-
-          for file in files_to_review:
-              try:
-                  with open(file, 'r') as f:
-                      code = f.read()
-
-                  inputs = tokenizer(f'''
-Review the following Python code for optimization opportunities, including performance, memory usage, and algorithmic complexity.  Be specific and provide actionable suggestions.  Format your output with bullet points for each suggestion, including the file name and line number if applicable. If no issues are found, say "No issues found in {file}".
-
-```python
-{code}
+      - name: Post Code Review to Commit (Fallback if not PR)
+        if: github.event_name != 'pull_request'
+        run: |
+          COMMIT_SHA=$GITHUB_SHA
+          COMMENT="Code review complete! Check the output below for suggestions on optimizations.\n\n$(cat review_output.txt)"
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/comments
