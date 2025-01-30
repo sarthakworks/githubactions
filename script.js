@@ -6,5 +6,5 @@ clickMeBtn.addEventListener('click', function() {
     alert('Button was clicked ' + 'k' )
 
     // Global variable leak, which is bad practice
-    someGlobalVariable = 'This is a global variable';
+    someGlobalVariabl.    = 'This is a global variable';
 });
