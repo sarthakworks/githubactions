@@ -24,6 +24,7 @@ jobs:
           node-version: '14'
 
       # Step 3: Install DeepSeek
+      - name: Install DeepSeek
         run: |
           npm install -g deepseek
 
@@ -32,7 +33,7 @@ jobs:
         run: |
           deepseek analyze --report json --output deepseek-report.json
 
-      # Step 5: Upload DeepSeek report as an artifact (now using v3)
+      # Step 5: Upload DeepSeek report as an artifact (no 'run' here, just 'uses')
       - name: Upload DeepSeek report as an artifact
         uses: actions/upload-artifact@v3
         with:
@@ -49,9 +50,3 @@ jobs:
               -d "{\"body\": \"Code review complete! Check the suggestions for optimizations. \n\n$REPORT\"}" \
               "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
           fi
-
-      # Step 7: Add an optional cleanup or notification step (if needed)
-      - name: Notify if optimizations found
-        if: success() && steps.optimization-check.outcome == 'success'
-        run: |
-          echo "Optimizations detected and posted to PR."
