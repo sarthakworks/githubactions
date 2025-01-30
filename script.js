@@ -1,3 +1,3 @@
 document.getElementById('clickMeBtn').addEventListener('click', function() {
-    alert('Button was clicked!');
+    alert('Button was clicked k!');
 });
